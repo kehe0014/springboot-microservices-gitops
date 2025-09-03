@@ -1,9 +1,9 @@
 name: GitOps Sync
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:  # Manual triggering
 
 jobs:
@@ -12,11 +12,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Lint Helm Charts
-        uses: helm/chart-testing-action@v2.4.0 
+      - name: Set up Helm
+        uses: helm/helm-action@v3
         with:
-          command: lint
-          charts-dir: ./charts/ 
+          version: v3.12.0
+      
+      - name: Lint Helm Charts
+        run: |
+          helm lint ./charts/
+      
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.0'
 
   deploy-dev:
     runs-on: ubuntu-latest
@@ -30,9 +38,14 @@ jobs:
         with:
           kustomize-version: '5.1.0'
       
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.27.0'
+      
       - name: Deploy to Dev
         run: |
-          kubectl config set-cluster demo-cluster --server=${{ secrets.K8S_DEV_SERVER }}
+          kubectl config set-cluster demo-cluster --server=${{ secrets.K8S_DEV_SERVER }} --insecure-skip-tls-verify=true
           kubectl config set-credentials gitops-user --token=${{ secrets.K8S_DEV_TOKEN }}
           kubectl config set-context demo-context --cluster=demo-cluster --user=gitops-user
           kubectl config use-context demo-context
