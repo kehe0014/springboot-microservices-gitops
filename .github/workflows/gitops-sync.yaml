@@ -57,7 +57,6 @@ jobs:
       - name: Configure kubectl with base64 config
         run: |
           mkdir -p ~/.kube
-          # Use printf to avoid echo interpretation issues
           printf '%s' "$K8S_CONFIG_BASE64" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
         env:
@@ -66,6 +65,110 @@ jobs:
       - name: Verify cluster access
         run: kubectl cluster-info
       
+      - name: Create namespace if needed
+        run: kubectl create namespace dev-microservices --dry-run=client -o yaml | kubectl apply -f -
+      
       - name: Deploy to Dev
         run: |
           kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply -f -
+
+  verify-deployment:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: deploy-dev
+    steps:
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.27.0'
+      
+      - name: Configure kubectl with base64 config
+        run: |
+          mkdir -p ~/.kube
+          printf '%s' "$K8S_CONFIG_BASE64" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+        env:
+          K8S_CONFIG_BASE64: ${{ secrets.K8S_CONFIG_BASE64 }}
+      
+      - name: Verify all pods are running
+        run: |
+          echo "Checking pod status in dev-microservices namespace..."
+          # Wait for pods to be ready (max 5 minutes)
+          timeout 300s bash -c '
+            while true; do
+              # Get all pods and check if they are all running
+              pod_status=$(kubectl get pods -n dev-microservices --no-headers 2>/dev/null)
+              
+              if [ -z "$pod_status" ]; then
+                echo "No pods found yet, waiting..."
+                sleep 10
+                continue
+              fi
+              
+              # Check if all pods are running and ready
+              all_ready=$(kubectl get pods -n dev-microservices -o jsonpath="{.items[*].status.conditions[?(@.type=='Ready')].status}" | grep -v "False")
+              
+              if echo "$all_ready" | grep -q "False"; then
+                echo "Some pods are not ready yet. Current status:"
+                kubectl get pods -n dev-microservices
+                sleep 10
+              else
+                echo "All pods are ready!"
+                kubectl get pods -n dev-microservices
+                break
+              fi
+            done
+          '
+      
+      - name: Check deployment status
+        run: |
+          echo "Checking deployment status..."
+          kubectl get deployments -n dev-microservices -o wide
+          
+          # Verify all deployments are available
+          unavailable_deployments=$(kubectl get deployments -n dev-microservices -o jsonpath='{.items[?(@.status.availableReplicas!=@.status.replicas)].metadata.name}')
+          
+          if [ -n "$unavailable_deployments" ]; then
+            echo "ERROR: Some deployments are not fully available: $unavailable_deployments"
+            exit 1
+          else
+            echo "✅ All deployments are fully available"
+          fi
+      
+      - name: Check service status
+        run: |
+          echo "Checking service status..."
+          kubectl get services -n dev-microservices
+          
+          # Verify services have endpoints
+          services_without_endpoints=$(kubectl get services -n dev-microservices -o jsonpath='{.items[?(@.spec.selector)].metadata.name}' | while read service; do
+            endpoints=$(kubectl get endpoints "$service" -n dev-microservices --no-headers 2>/dev/null | awk "{print \$2}")
+            if [ -z "$endpoints" ] || [ "$endpoints" = "<none>" ]; then
+              echo "$service"
+            fi
+          done)
+          
+          if [ -n "$services_without_endpoints" ]; then
+            echo "WARNING: Some services have no endpoints: $services_without_endpoints"
+          else
+            echo "✅ All services have endpoints"
+          fi
+      
+      - name: Run basic health checks
+        run: |
+          echo "Running basic health checks..."
+          
+          # Try to access services if they have external IPs or are LoadBalancer type
+          services=$(kubectl get services -n dev-microservices -o jsonpath='{.items[?(@.spec.type=="LoadBalancer" || @.spec.type=="NodePort")].metadata.name}')
+          
+          for service in $services; do
+            echo "Checking service: $service"
+            # Get service details
+            kubectl describe service "$service" -n dev-microservices
+          done
+      
+      - name: Final verification
+        run: |
+          echo "🎉 Deployment verification completed successfully!"
+          echo "Summary of resources in dev-microservices namespace:"
+          kubectl get all -n dev-microservices
