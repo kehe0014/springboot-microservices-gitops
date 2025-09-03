@@ -8,4 +8,4 @@ spec:
     spec:
       containers:
         - name: api-gateway
-          image: tdksoft341/api-gateway:dev
+          image: tdksoft341/api-gateway:latest

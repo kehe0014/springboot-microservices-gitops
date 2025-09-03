@@ -8,4 +8,4 @@ spec:
     spec:
       containers:
         - name: product-service
-          image: tdksoft341/product-service:dev
+          image: tdksoft341/product-service:latest
