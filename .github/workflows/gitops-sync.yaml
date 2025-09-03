@@ -88,7 +88,9 @@ jobs:
       
       - name: Verify Cluster Access
         run: kubectl cluster-info
-
+      - name: Verify Secret Access (masked)
+        run: |
+          echo "Secret is being used: ${{ secrets.DOCKERHUB_TOKEN }}"
       - name: Create Docker Hub Secret
         env:
           DOCKER_USERNAME: tdksoft341
