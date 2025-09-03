@@ -64,20 +64,7 @@ jobs:
 
       - name: Deploy with Kustomize
         run: |
-          set -e
-          echo "🔧 Building manifests with Kustomize..."
-          kustomize build ./k8s/kustomize/environments/dev/ > manifests.yaml
-          
-          # Check if the file contains at least one "kind:" line (indicates a K8s resource)
-          if ! grep -q "^kind:" manifests.yaml; then
-            echo "⚠️ No Kubernetes objects found in manifests.yaml. Skipping deployment."
-            exit 0
-          fi
-          
-          echo "📦 Applying manifests..."
-          kubectl apply --prune -f manifests.yaml --selector=app.kubernetes.io/managed-by=gitops-ci
-          echo "✅ Deployment applied successfully"
-
+          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply --prune -f -
 
   verify-deployment:
     name: Verify Deployment Status
