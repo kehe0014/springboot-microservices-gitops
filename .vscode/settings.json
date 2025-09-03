@@ -1,8 +1,23 @@
 {
+    // Existing file-level settings for consistency
     "files.eol": "\n",
     "files.insertFinalNewline": true,
     "files.trimTrailingWhitespace": true,
-    "editor.renderWhitespace": "boundary",
-    "editor.tabSize": 4,
-    "editor.detectIndentation": false
+    
+    // Existing editor settings for visual style and indentation
+    "editor.renderWhitespace": "all",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false,
+    "editor.formatOnSave": true, // Automatically format files on save
+
+    // New: Language-specific settings for YAML
+    "[yaml]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode", // Set Prettier as the default formatter for YAML
+        "editor.tabSize": 2 // YAML-specific indentation for 2 spaces
+    },
+    
+    // New: YAML validation and schema settings
+    "yaml.validate": true,
+    "yaml.format.enable": true,
+    "yaml.format.singleQuote": false
 }

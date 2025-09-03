@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Kustomize Overlay Validation Script with Dry-Run
+# Kustomize Overlay Validation Script with Self-Contained Dependencies
 # ==============================================================================
 
 set -Eeuo pipefail
@@ -16,8 +16,9 @@ function on_error {
 trap on_error ERR
 
 # --- Script Configuration ---
-KUSTOMIZE_BASE_DIR="../k8s/kustomize/base"
-KUSTOMIZE_OVERLAYS_DIR="../k8s/kustomize/environments"
+K8_S_DIR="../k8s"
+KUSTOMIZE_BASE_DIR="$K8_S_DIR/kustomize/base"
+KUSTOMIZE_OVERLAYS_DIR="$K8_S_DIR/kustomize/environments"
 
 # --- Helper Functions ---
 function check_directory_exists {
@@ -38,67 +39,82 @@ function check_file_exists {
 
 # --- Main Logic ---
 echo "=============================================="
-echo "🚀 Starting Kustomize Overlay Validation"
+echo "🚀 Starting Kustomize and YAML Validation"
 echo "=============================================="
 
-# --- Step 1: Pre-flight Checks ---
-echo "--- Step 1: Running Pre-flight Checks ---"
-check_directory_exists "${KUSTOMIZE_BASE_DIR}"
-check_directory_exists "${KUSTOMIZE_OVERLAYS_DIR}"
-
-echo "📝 Checking for base kustomization.yaml files..."
-for service_dir in "${KUSTOMIZE_BASE_DIR}"/*/; do
-  service_name=$(basename "${service_dir}")
-  if [[ -d "${service_dir}" ]]; then
-    check_file_exists "${service_dir}/kustomization.yaml"
-    echo "✅ Base kustomization.yaml for ${service_name} exists."
+# --- Step 1: Check and Install yamllint ---
+echo "--- Step 1: Checking for yamllint dependency ---"
+if ! command -v yamllint &> /dev/null; then
+  echo "⚠️ yamllint not found. Installing now..."
+  if command -v pip &> /dev/null; then
+    pip install yamllint
+  else
+    echo "❌ Error: 'pip' command not found. Please install Python and pip to proceed."
+    exit 1
   fi
-done
-echo "All base kustomization files are present."
+  echo "✅ yamllint installed successfully."
+else
+  echo "✅ yamllint is already installed."
+fi
 echo ""
 
-# --- Step 2: Building and Validating Overlays ---
-echo "--- Step 2: Building and Validating Overlays ---"
+# --- Step 2: Run YAML Linting on all manifest files ---
+echo "--- Step 2: Running YAML linting on all manifest files ---"
+find $K8_S_DIR -type f \( -name "*.yaml" -o -name "*.yml" \) -print0 | while IFS= read -r -d '' yaml_file; do
+  echo "🔍 Linting file: ${yaml_file}"
+  yamllint "${yaml_file}" || { echo "❌ YAML linting failed for ${yaml_file}"; exit 1; }
+done
+echo "✅ All YAML files are syntactically valid."
+echo ""
 
-# Loop through each environment directory (e.g., dev, prod, staging)
+# --- Step 3: Validate Base Manifests with Kustomize build ---
+echo "--- Step 3: Validating Base Manifests ---"
+check_directory_exists "${KUSTOMIZE_BASE_DIR}"
+
+for service_dir in "${KUSTOMIZE_BASE_DIR}"/*/; do
+  if [[ -d "${service_dir}" ]]; then
+    service_name=$(basename "${service_dir}")
+    kustomization_file="${service_dir}/kustomization.yaml"
+    check_file_exists "${kustomization_file}"
+    
+    echo "📝 Building base manifests for ${service_name}..."
+    kustomize build "${service_dir}" | kubectl apply --dry-run=client -f - >/dev/null
+    echo "✅ Base manifests for ${service_name} are valid."
+  fi
+done
+echo ""
+
+# --- Step 4: Building and Validating Overlays ---
+echo "--- Step 4: Building and Validating Overlays ---"
+check_directory_exists "${KUSTOMIZE_OVERLAYS_DIR}"
+
 for env_dir in "${KUSTOMIZE_OVERLAYS_DIR}"/*/; do
   if [[ -d "${env_dir}" ]]; then
     ENV_NAME=$(basename "${env_dir}")
     
-    echo "📝 Validating overlay for environment: ${ENV_NAME}..."
+    echo "📝 Building and validating overlay for environment: ${ENV_NAME}..."
     
-    KUSTOMIZATION_FILE="${env_dir}/kustomization.yaml"
-    check_file_exists "${KUSTOMIZATION_FILE}"
+    kustomization_file="${env_dir}/kustomization.yaml"
+    check_file_exists "${kustomization_file}"
     
-    if [[ ! -s "${KUSTOMIZATION_FILE}" ]]; then
-      echo "❌ Error: Kustomization file '${KUSTOMIZATION_FILE}' is empty."
+    if [[ ! -s "${kustomization_file}" ]]; then
+      echo "❌ Error: Kustomization file '${kustomization_file}' is empty."
       exit 1
     fi
 
-    # Navigate to the specific environment directory
-    cd "${env_dir}"
-
-    # Build the manifests and check for empty output
-    BUILD_OUTPUT=$(kustomize build .)
-    if [[ -z "${BUILD_OUTPUT}" ]]; then
-      echo "❌ Kustomize build produced no output. This might indicate an issue with file references."
+    BUILD_AND_DRY_RUN_OUTPUT=$(kustomize build "${env_dir}" | kubectl apply --dry-run=client -f - 2>&1)
+    
+    if [[ "${BUILD_AND_DRY_RUN_OUTPUT}" =~ "Error from server" ]]; then
+      echo "❌ Validation failed for ${ENV_NAME}."
+      echo "${BUILD_AND_DRY_RUN_OUTPUT}"
       exit 1
     fi
-    
-    # --- Step 3: Performing a Dry-Run Deployment ---
-    echo "🔍 Performing dry-run deployment for ${ENV_NAME}..."
-    
-    # The 'kustomize build' output is piped directly to 'kubectl apply --dry-run=client'
-    # This checks if the generated manifests are syntactically and semantically valid
-    echo "${BUILD_OUTPUT}" | kubectl apply --dry-run=client -f - >/dev/null
     
     echo "✅ Kustomize build and dry-run successful for ${ENV_NAME}."
-    
-    cd - >/dev/null # Go back to the previous directory
+    echo ""
   fi
 done
 
-echo ""
 echo "=============================================="
-echo "🎉 Kustomize overlays validated successfully!"
+echo "🎉 Kustomize and YAML files validated successfully!"
 echo "=============================================="
