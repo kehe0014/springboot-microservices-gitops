@@ -1,0 +1,39 @@
+name: GitOps Sync
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Lint Helm Charts
+        uses: helm/chart-testing-action@v2.3.1
+        with:
+          command: lint
+          charts-dir: charts/
+
+  deploy-dev:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: lint-helm
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: '5.1.0'
+      
+      - name: Deploy to Dev
+        run: |
+          kubectl config set-cluster demo-cluster --server=${{ secrets.K8S_DEV_SERVER }}
+          kubectl config set-credentials gitops-user --token=${{ secrets.K8S_DEV_TOKEN }}
+          kubectl config set-context demo-context --cluster=demo-cluster --user=gitops-user
+          kubectl config use-context demo-context
+          
+          kustomize build overlays/dev/ | kubectl apply -f -

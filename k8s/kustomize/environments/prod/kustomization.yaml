@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Set the namespace for the production environment
+namespace: prod-microservices
+# Add a common label to all resources in this overlay
+# Reference the base manifests for each microservice
+resources:
+- ../../base/api-gateway
+- ../../base/product-service
+- ../../base/user-service
+# Apply production-specific patches
+patches:
+- path: api-gateway-patch.yaml
+  target:
+    kind: Deployment
+    name: api-gateway-deployment
+- path: product-service-patch.yaml
+  target:
+    kind: Deployment
+    name: product-service
+- path: user-service-patch.yaml
+  target:
+    kind: Deployment
+    name: user-service
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/managed-by: kustomize
+    env: prod

@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway-deployment
+spec:
+  # Increase the number of replicas for high availability
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: api-gateway
+          # Use a specific production image tag for stability
+          image: your-image-repository/api-gateway:1.0.0
+          # Increase resource requests and limits for production load
+          resources:
+            requests:
+              memory: '256Mi'
+              cpu: '250m'
+            limits:
+              memory: '512Mi'
+              cpu: '500m'

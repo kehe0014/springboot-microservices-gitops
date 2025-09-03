@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: product-service
+          image: tdksoft341/product-service:dev
