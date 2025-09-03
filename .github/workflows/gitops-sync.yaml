@@ -1,10 +1,3 @@
-The error message `couldn't get version/kind` indicates that the `kubeconfig` file created from your secret is corrupted. This is a common issue with `base64` decoding when extra whitespace or newlines are introduced, causing the YAML or JSON to be unparsable.
-
-To fix this, we will revert to a more robust and direct method of handling the secret. Instead of relying on the `azure/k8s-set-context` action to decode the secret, we will manually decode it into a file using `base64 --decode`. This ensures the file is created correctly before any `kubectl` commands are run.
-
-Here is the full, corrected script with the fix applied to both the `deploy-dev` and `verify-deployment` jobs.
-
-```yaml
 name: GitOps Sync
 
 # Controls when the workflow will run
@@ -33,7 +26,6 @@ jobs:
 
       - name: Find and Lint All Helm Charts
         run: |
-          # Use a more robust 'while' loop to handle paths with spaces
           find ./charts -type f -name "Chart.yaml" -print0 | while IFS= read -r -d '' chart_file; do
             chart_dir=$(dirname "$chart_file")
             echo "Linting chart in directory: $chart_dir"
@@ -61,7 +53,6 @@ jobs:
         with:
           version: 'v1.27.0'
 
-      # Corrected step to securely decode the kubeconfig secret
       - name: Decode Kubeconfig Secret
         run: |
           mkdir -p ~/.kube
@@ -87,7 +78,6 @@ jobs:
         with:
           version: 'v1.27.0'
       
-      # Corrected step to securely decode the kubeconfig secret
       - name: Decode Kubeconfig Secret
         run: |
           mkdir -p ~/.kube
@@ -105,4 +95,3 @@ jobs:
           echo "🎉 All deployments are ready and running!"
           echo "Summary of resources in dev-microservices namespace:"
           kubectl get all -n dev-microservices
-```
