@@ -54,11 +54,15 @@ jobs:
         with:
           version: 'v1.27.0'
       
-      - name: Configure Kubeconfig
+      - name: Configure kubectl with base64 config
         run: |
           mkdir -p ~/.kube
-          echo '${{ secrets.K8S_CONFIG }}' | base64 -d > ~/.kube/config
-        
+          # Use printf to avoid echo interpretation issues
+          printf '%s' "$K8S_CONFIG_BASE64" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+        env:
+          K8S_CONFIG_BASE64: ${{ secrets.K8S_CONFIG_BASE64 }}
+      
       - name: Verify cluster access
         run: kubectl cluster-info
       
