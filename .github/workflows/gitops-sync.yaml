@@ -64,7 +64,7 @@ jobs:
 
       - name: Deploy with Kustomize
         run: |
-          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply --prune -f -
+          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply --prune -f - --selector app.kubernetes.io/managed-by=gitops-ci
 
   verify-deployment:
     name: Verify Deployment Status
