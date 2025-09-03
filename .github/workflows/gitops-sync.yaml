@@ -15,7 +15,7 @@ jobs:
         uses: helm/chart-testing-action@v2.3.1
         with:
           command: lint
-          charts-dir: charts/
+          charts-dir: ../../charts/
 
   deploy-dev:
     runs-on: ubuntu-latest
