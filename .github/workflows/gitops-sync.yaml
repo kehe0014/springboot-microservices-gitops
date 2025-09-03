@@ -4,7 +4,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Manual triggering
+  workflow_dispatch:
 
 jobs:
   lint-helm:
@@ -12,16 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.4.0
+
       - name: Lint Helm Charts
-        uses: helm/chart-testing-action@v2.4.0 
-        with:
-          command: lint
-          charts-dir: ../../charts/ 
+        run: ct lint --charts ./charts
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
         with:
-          cosign-version: 'v2.0.0'
+          cosign-release: 'v2.4.0'
 
   deploy-dev:
     runs-on: ubuntu-latest
@@ -42,4 +42,4 @@ jobs:
           kubectl config set-context demo-context --cluster=demo-cluster --user=gitops-user
           kubectl config use-context demo-context
           
-          kustomize build ../../k8s/kustomize/environments/dev/ | kubectl apply -f -
+          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply -f -
