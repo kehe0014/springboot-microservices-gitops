@@ -7,20 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint-helm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up chart-testing
-        uses: helm/chart-testing-action@v2.4.0
+lint-helm:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up chart-testing
+      uses: helm/chart-testing-action@v2.4.0
 
-      - name: Lint Helm Charts
-        run: ct lint --charts ./charts
+    - name: Lint Helm Charts
+      run: ct lint --charts ./charts
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@v3
+      with:
+        cosign-release: 'v2.4.0'
   deploy-dev:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
