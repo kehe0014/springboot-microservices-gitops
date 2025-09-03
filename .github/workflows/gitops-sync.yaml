@@ -86,15 +86,34 @@ jobs:
           mkdir -p ~/.kube
           echo "${{ secrets.K8S_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
+      
       - name: Verify Cluster Access
         run: kubectl cluster-info
 
-      - name: Wait for Deployments to be Ready
+      - name: Debug Deployment Status
         run: |
-          kubectl rollout status deployment/api-gateway-deployment -n dev-microservices --timeout=5m
-          kubectl rollout status deployment/user-service-deployment -n dev-microservices --timeout=5m
-           kubectl rollout status deployment/user-service -n dev-microservices --timeout=5m
+          echo "--- Pod Status in dev-microservices ---"
+          kubectl get pods -n dev-microservices -o wide
+          
+          echo "--- Events for api-gateway-deployment ---"
+          kubectl describe deployment api-gateway-deployment -n dev-microservices
+          
+          echo "--- Events for user-service ---"
+          kubectl describe deployment user-service -n dev-microservices
+          
+          echo "--- Events for product-service ---"
+          kubectl describe deployment product-service -n dev-microservices
 
+      - name: Capture Pod Logs for Troubleshooting
+        run: |
+          echo "--- Logs for api-gateway pods ---"
+          kubectl logs -l app=api-gateway -n dev-microservices --tail=50
+          
+          echo "--- Logs for user-service pods ---"
+          kubectl logs -l app=user-service -n dev-microservices --tail=50
+
+          echo "--- Logs for product-service pods ---"
+          kubectl logs -l app=product-service -n dev-microservices --tail=50
 
       - name: Verify Final Status
         run: |
