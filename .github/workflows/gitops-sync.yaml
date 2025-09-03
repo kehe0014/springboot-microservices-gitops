@@ -1,174 +1,103 @@
 name: GitOps Sync
+
+# Controls when the workflow will run
 on:
   push:
-    branches: [main, develop]
+    branches:
+      - main
+      - develop
   pull_request:
-    branches: [main]
-  workflow_dispatch:  # Manual triggering
+    branches:
+      - main
+  workflow_dispatch:
 
+# Defines a single reusable job for Kubernetes cluster access
 jobs:
-  lint-helm:
+  configure-k8s:
+    name: Configure Kubernetes Access
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Helm
+      - name: Configure kubectl with Base64 Secret
+        id: configure-kubectl
+        uses: sergeymind/k8s-configure-action@v1
+        with:
+          k8s_cluster_config: ${{ secrets.K8S_CONFIG_BASE64 }}
+          k8s_version: 'v1.27.0'
+
+# A job to lint Helm charts for quality control
+  lint-helm:
+    name: Lint Helm Charts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
         uses: azure/setup-helm@v4
         with:
           version: 'v3.12.0'
-      
-      - name: Find and lint all Helm charts
+
+      - name: Find and Lint All Helm Charts
         run: |
-          # Find all Chart.yaml files and get their directory paths
-          find ./charts -name "Chart.yaml" | while read chart_file; do
+          # Use a more robust 'while' loop to handle paths with spaces
+          find ./charts -type f -name "Chart.yaml" -print0 | while IFS= read -r -d '' chart_file; do
             chart_dir=$(dirname "$chart_file")
             echo "Linting chart in directory: $chart_dir"
-            helm lint "$chart_dir"
-            if [ $? -eq 0 ]; then
-              echo "✅ Chart $chart_dir linted successfully"
-            else
-              echo "❌ Chart $chart_dir failed linting"
-              exit 1
-            fi
+            helm lint "$chart_dir" || { echo "❌ Chart $chart_dir failed linting"; exit 1; }
+            echo "✅ Chart $chart_dir linted successfully"
           done
-      
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-        with:
-          cosign-release: 'v2.4.0'
 
+# A job to deploy to the dev environment
   deploy-dev:
+    name: Deploy to Dev Environment
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    needs: lint-helm
+    needs: 
+      - lint-helm
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
         with:
           kustomize-version: '5.1.0'
-      
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'v1.27.0'
-      
-      - name: Configure kubectl with base64 config
-        run: |
-          mkdir -p ~/.kube
-          printf '%s' "$K8S_CONFIG_BASE64" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
-        env:
-          K8S_CONFIG_BASE64: ${{ secrets.K8S_CONFIG_BASE64 }}
-      
-      - name: Verify cluster access
-        run: kubectl cluster-info
-      
-      - name: Create namespace if needed
-        run: kubectl create namespace dev-microservices --dry-run=client -o yaml | kubectl apply -f -
-      
-      - name: Deploy to Dev
-        run: |
-          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply -f -
 
+      - name: Configure Kubernetes Access
+        uses: sergeymind/k8s-configure-action@v1
+        with:
+          k8s_cluster_config: ${{ secrets.K8S_CONFIG_BASE64 }}
+          k8s_version: 'v1.27.0'
+
+      - name: Verify Cluster Access
+        run: kubectl cluster-info
+
+      - name: Deploy with Kustomize
+        run: |
+          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply --prune -f -
+
+# A job to verify the deployment's status
   verify-deployment:
+    name: Verify Deployment Status
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    needs: deploy-dev
+    needs: 
+      - deploy-dev
     steps:
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Configure Kubernetes Access
+        uses: sergeymind/k8s-configure-action@v1
         with:
-          version: 'v1.27.0'
-      
-      - name: Configure kubectl with base64 config
-        run: |
-          mkdir -p ~/.kube
-          printf '%s' "$K8S_CONFIG_BASE64" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
-        env:
-          K8S_CONFIG_BASE64: ${{ secrets.K8S_CONFIG_BASE64 }}
-      
-      - name: Verify all pods are running
-        run: |
-          echo "Checking pod status in dev-microservices namespace..."
-          # Wait for pods to be ready (max 5 minutes)
-          timeout 300s bash -c '
-            while true; do
-              # Get all pods and check if they are all running
-              pod_status=$(kubectl get pods -n dev-microservices --no-headers 2>/dev/null)
-              
-              if [ -z "$pod_status" ]; then
-                echo "No pods found yet, waiting..."
-                sleep 10
-                continue
-              fi
-              
-              # Check if all pods are running and ready
-              all_ready=$(kubectl get pods -n dev-microservices -o jsonpath="{.items[*].status.conditions[?(@.type=='Ready')].status}" | grep -v "False")
-              
-              if echo "$all_ready" | grep -q "False"; then
-                echo "Some pods are not ready yet. Current status:"
-                kubectl get pods -n dev-microservices
-                sleep 10
-              else
-                echo "All pods are ready!"
-                kubectl get pods -n dev-microservices
-                break
-              fi
-            done
-          '
-      
-      - name: Check deployment status
-        run: |
-          echo "Checking deployment status..."
-          kubectl get deployments -n dev-microservices -o wide
-          
-          # Verify all deployments are available
-          unavailable_deployments=$(kubectl get deployments -n dev-microservices -o jsonpath='{.items[?(@.status.availableReplicas!=@.status.replicas)].metadata.name}')
-          
-          if [ -n "$unavailable_deployments" ]; then
-            echo "ERROR: Some deployments are not fully available: $unavailable_deployments"
-            exit 1
-          else
-            echo "✅ All deployments are fully available"
-          fi
-      
-      - name: Check service status
-        run: |
-          echo "Checking service status..."
-          kubectl get services -n dev-microservices
-          
-          # Verify services have endpoints
-          services_without_endpoints=$(kubectl get services -n dev-microservices -o jsonpath='{.items[?(@.spec.selector)].metadata.name}' | while read service; do
-            endpoints=$(kubectl get endpoints "$service" -n dev-microservices --no-headers 2>/dev/null | awk "{print \$2}")
-            if [ -z "$endpoints" ] || [ "$endpoints" = "<none>" ]; then
-              echo "$service"
-            fi
-          done)
-          
-          if [ -n "$services_without_endpoints" ]; then
-            echo "WARNING: Some services have no endpoints: $services_without_endpoints"
-          else
-            echo "✅ All services have endpoints"
-          fi
-      
-      - name: Run basic health checks
-        run: |
-          echo "Running basic health checks..."
-          
-          services=$(kubectl get services -n dev-microservices \
-            -o jsonpath='{.items[?(@.spec.type=="LoadBalancer")].metadata.name} {.items[?(@.spec.type=="NodePort")].metadata.name}')
-          
-          for service in $services; do
-            echo "Checking service: $service"
-            kubectl describe service "$service" -n dev-microservices
-          done
+          k8s_cluster_config: ${{ secrets.K8S_CONFIG_BASE64 }}
+          k8s_version: 'v1.27.0'
 
-      
-      - name: Final verification
+      - name: Wait for Deployments to be Ready
+        uses: sergeymind/k8s-wait-action@v1
+        with:
+          namespace: dev-microservices
+          timeout: '300s'
+
+      - name: Verify Final Status
         run: |
-          echo "🎉 Deployment verification completed successfully!"
+          echo "🎉 All deployments are ready and running!"
           echo "Summary of resources in dev-microservices namespace:"
           kubectl get all -n dev-microservices
