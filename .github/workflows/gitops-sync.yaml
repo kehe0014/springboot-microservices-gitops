@@ -158,14 +158,14 @@ jobs:
         run: |
           echo "Running basic health checks..."
           
-          # Try to access services if they have external IPs or are LoadBalancer type
-          services=$(kubectl get services -n dev-microservices -o jsonpath='{.items[?(@.spec.type=="LoadBalancer" || @.spec.type=="NodePort")].metadata.name}')
+          services=$(kubectl get services -n dev-microservices \
+            -o jsonpath='{.items[?(@.spec.type=="LoadBalancer")].metadata.name} {.items[?(@.spec.type=="NodePort")].metadata.name}')
           
           for service in $services; do
             echo "Checking service: $service"
-            # Get service details
             kubectl describe service "$service" -n dev-microservices
           done
+
       
       - name: Final verification
         run: |
