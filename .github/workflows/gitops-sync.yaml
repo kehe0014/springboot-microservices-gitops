@@ -19,7 +19,7 @@ jobs:
       
       - name: Lint Helm Charts
         run: |
-          helm lint ./charts/
+          helm lint ../../charts/
       
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
@@ -50,4 +50,4 @@ jobs:
           kubectl config set-context demo-context --cluster=demo-cluster --user=gitops-user
           kubectl config use-context demo-context
           
-          kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply -f -
+          kustomize build ../../k8s/kustomize/environments/dev/ | kubectl apply -f -
