@@ -4,6 +4,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # Manual triggering
 
 jobs:
   lint-helm:
@@ -12,10 +13,10 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Lint Helm Charts
-        uses: helm/chart-testing-action@v2.3.1
+        uses: helm/chart-testing-action@v2.4.0 
         with:
           command: lint
-          charts-dir: charts/
+          charts-dir: ../../charts/
 
   deploy-dev:
     runs-on: ubuntu-latest
@@ -36,4 +37,4 @@ jobs:
           kubectl config set-context demo-context --cluster=demo-cluster --user=gitops-user
           kubectl config use-context demo-context
           
-          kustomize build overlays/dev/ | kubectl apply -f -
+          kustomize build ../../k8s/kustomize/dev/ | kubectl apply -f -
