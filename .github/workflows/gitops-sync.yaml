@@ -86,12 +86,15 @@ jobs:
           mkdir -p ~/.kube
           echo "${{ secrets.K8S_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
+      - name: Verify Cluster Access
+        run: kubectl cluster-info
 
       - name: Wait for Deployments to be Ready
-        uses: sergeymind/k8s-wait-action@v1
-        with:
-          namespace: dev-microservices
-          timeout: '300s'
+        run: |
+          kubectl rollout status deployment/api-gateway-deployment -n dev-microservices --timeout=5m
+          kubectl rollout status deployment/user-service-deployment -n dev-microservices --timeout=5m
+           kubectl rollout status deployment/user-service -n dev-microservices --timeout=5m
+
 
       - name: Verify Final Status
         run: |
