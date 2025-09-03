@@ -4,24 +4,25 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch:  # Manual triggering
 
 jobs:
-lint-helm:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up chart-testing
-      uses: helm/chart-testing-action@v2.4.0
+  lint-helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Lint Helm Charts
+        uses: helm/chart-testing-action@v2.4.0 
+        with:
+          command: lint
+          charts-dir: ./charts/ 
 
-    - name: Lint Helm Charts
-      run: ct lint --charts ./charts
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-version: 'v2.4.0'
 
-    - name: Install Cosign
-      uses: sigstore/cosign-installer@v3
-      with:
-        cosign-release: 'v2.4.0'
   deploy-dev:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
