@@ -37,4 +37,4 @@ jobs:
           kubectl config set-context demo-context --cluster=demo-cluster --user=gitops-user
           kubectl config use-context demo-context
           
-          kustomize build overlays/dev/ | kubectl apply -f -
+          kustomize build ../../k8s/kustomize/dev/ | kubectl apply -f -
