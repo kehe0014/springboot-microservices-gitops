@@ -11,20 +11,7 @@ on:
       - main
   workflow_dispatch:
 
-# Defines a single reusable job for Kubernetes cluster access
 jobs:
-  configure-k8s:
-    name: Configure Kubernetes Access
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure kubectl with Base64 Secret
-        id: configure-kubectl
-        uses: sergeymind/k8s-configure-action@v1
-        with:
-          k8s_cluster_config: ${{ secrets.K8S_CONFIG_BASE64 }}
-          k8s_version: 'v1.27.0'
-
-# A job to lint Helm charts for quality control
   lint-helm:
     name: Lint Helm Charts
     runs-on: ubuntu-latest
@@ -47,7 +34,6 @@ jobs:
             echo "✅ Chart $chart_dir linted successfully"
           done
 
-# A job to deploy to the dev environment
   deploy-dev:
     name: Deploy to Dev Environment
     runs-on: ubuntu-latest
@@ -63,12 +49,18 @@ jobs:
         with:
           kustomize-version: '5.1.0'
 
-      - name: Configure Kubernetes Access
-        uses: sergeymind/k8s-configure-action@v1
+      # Fix for 'sergeymind/k8s-configure-action'
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
         with:
-          k8s_cluster_config: ${{ secrets.K8S_CONFIG_BASE64 }}
-          k8s_version: 'v1.27.0'
-
+          version: 'v1.27.0'
+          
+      # Fix for 'sergeymind/k8s-configure-action'
+      - name: Set Kubernetes Context
+        uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.K8S_CONFIG_BASE64 }}
+          
       - name: Verify Cluster Access
         run: kubectl cluster-info
 
@@ -76,7 +68,6 @@ jobs:
         run: |
           kustomize build ./k8s/kustomize/environments/dev/ | kubectl apply --prune -f -
 
-# A job to verify the deployment's status
   verify-deployment:
     name: Verify Deployment Status
     runs-on: ubuntu-latest
@@ -84,11 +75,17 @@ jobs:
     needs: 
       - deploy-dev
     steps:
-      - name: Configure Kubernetes Access
-        uses: sergeymind/k8s-configure-action@v1
+      # Fix for 'sergeymind/k8s-configure-action'
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
         with:
-          k8s_cluster_config: ${{ secrets.K8S_CONFIG_BASE64 }}
-          k8s_version: 'v1.27.0'
+          version: 'v1.27.0'
+          
+      # Fix for 'sergeymind/k8s-configure-action'
+      - name: Set Kubernetes Context
+        uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.K8S_CONFIG_BASE64 }}
 
       - name: Wait for Deployments to be Ready
         uses: sergeymind/k8s-wait-action@v1
