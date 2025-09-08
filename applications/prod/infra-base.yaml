@@ -1,12 +1,12 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: infra-base
+  name: infra-base-prod
   namespace: argocd
 spec:
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: argocd # The namespace where the resources will be deployed
+    namespace: argocd-prod # The namespace where the resources will be deployed
   project: default
   source:
     repoURL: 'https://github.com/kehe0014/springboot-microservices-gitops.git'
