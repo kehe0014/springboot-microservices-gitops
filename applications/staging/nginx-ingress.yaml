@@ -1,4 +1,3 @@
-# applications/dev/nginx-ingress.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -7,21 +6,21 @@ metadata:
 spec:
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: ingress-nginx # Le chart va créer ce namespace
+    namespace: ingress-nginx
   project: default
   source:
-    repoURL: 'https://kubernetes.github.io/ingress-nginx'
-    targetRevision: 4.9.1 # Spécifiez une version stable récente
-    chart: ingress-nginx
+    repoURL: 'https://github.com/kehe0014/springboot-microservices-gitops.git'
+    targetRevision: HEAD
+    path: infrastructure/base/nginx-ingress-chart
     helm:
       valueFiles:
-        - $values/infrastructure/base/nginx-ingress/values.yaml
+        - values.yaml
   syncPolicy:
     automated:
       selfHeal: true
       prune: true
     syncOptions:
-      - CreateNamespace=true # ArgoCD créera le namespace s'il n'existe pas
+      - CreateNamespace=true
   ignoreDifferences:
     - group: apps
       kind: Deployment

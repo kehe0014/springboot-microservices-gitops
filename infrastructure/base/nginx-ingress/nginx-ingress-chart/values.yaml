@@ -1,0 +1,22 @@
+# Values for the ingress-nginx dependency
+ingress-nginx:
+  controller:
+    service:
+      type: LoadBalancer
+      externalIPs:
+        - 178.59.23.139 # Your VPS public IP
+    watchIngressWithoutClass: true
+    publishService:
+      enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    config:
+      use-forwarded-headers: "true"
+      compute-full-forwarded-for: "true"
+      proxy-buffer-size: "16k"
+
+# Values for this wrapper chart (if needed in future)
+global:
+  clusterDomain: cluster.local
