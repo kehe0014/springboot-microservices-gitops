@@ -11,7 +11,7 @@ spec:
   source:
     repoURL: 'https://github.com/kehe0014/springboot-microservices-gitops.git'
     targetRevision: HEAD
-    path: infrastructure/base/nginx-ingress-chart
+    path: infrastructure/base/nginx-ingress/nginx-ingress-chart
     helm:
       valueFiles:
         - values.yaml
