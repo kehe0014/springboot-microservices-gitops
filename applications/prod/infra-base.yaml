@@ -6,7 +6,7 @@ metadata:
 spec:
   destination:
     server: "https://kubernetes.default.svc"
-    namespace: argocd-prod # The namespace where the resources will be deployed
+    namespace: argocd-prod
   project: default
   source:
     repoURL: 'https://github.com/kehe0014/springboot-microservices-gitops.git'
