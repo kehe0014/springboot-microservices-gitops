@@ -1,0 +1,21 @@
+controller:
+  # Forcer l'utilisation de l'IP publique de votre VPS
+  service:
+    type: LoadBalancer
+    externalIPs:
+      - 178.59.23.139 # Remplacez par votre IP si différente
+  # Configurations recommandées pour K3s
+  watchIngressWithoutClass: true
+  publishService:
+    enabled: true
+  # Options pour économiser des ressources en dev (à ajuster en prod)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  # Configurer Nginx pour qu'il soit prêt à forwarder vers Traefik
+  # (Nous ajouterons les annotations spécifiques plus tard sur les Ingress)
+  config:
+    use-forwarded-headers: "true"
+    compute-full-forwarded-for: "true"
+    proxy-buffer-size: "16k"
