@@ -1,7 +1,0 @@
-nginx-ingress has been deployed!
-
-Get the external IP:
-kubectl get svc -n ingress-nginx ingress-nginx-controller
-
-Test the deployment:
-curl -H "Host: example.com" http://{{ .Values.ingress-nginx.controller.service.externalIPs.[0] }}
