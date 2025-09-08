@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infra-base
+  namespace: argocd
+spec:
+  destination:
+    server: "https://kubernetes.default.svc"
+    namespace: argocd # L'application elle-même est dans argocd, mais elle va créer des resources ailleurs
+  project: default
+  source:
+    repoURL: 'https://github.com/kehe0014/springboot-microservices-gitops.git'
+    targetRevision: HEAD
+    path: infrastructure/base
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true

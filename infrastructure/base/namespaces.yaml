@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps-dev
+  labels:
+    environment: dev
+    team: apps
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps-staging
+  labels:
+    environment: staging
+    team: apps
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps-prod
+  labels:
+    environment: prod
+    team: apps
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    team: platform

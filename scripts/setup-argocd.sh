@@ -1,41 +1,92 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Safely delete the ArgoCD namespace if it exists.
-# The '--ignore-not-found' flag prevents the script from failing
-# with an error if the namespace has already been deleted.
+# ============================================================
+# Expert-grade ArgoCD Installation Script using Helm
+# Target cluster: development (127.0.0.1)
+# Usage:
+#   ./setup-argocd.sh            # normal cleanup + install
+#   ./setup-argocd.sh --force-clean  # aggressive cleanup + install
+# ============================================================
+
+FORCE_CLEAN=false
+if [[ "${1:-}" == "--force-clean" ]]; then
+  FORCE_CLEAN=true
+fi
+
+# --- Pre-check: ensure cluster is reachable ---
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  echo "❌ No Kubernetes cluster detected. Please start your cluster and set the correct context."
+  exit 1
+fi
+
 echo "🧹 Cleaning up any existing ArgoCD installation..."
-kubectl delete namespace argocd --ignore-not-found=true
 
-echo "🚀 Deploying ArgoCD on the Kubernetes cluster..."
-echo "📦 Creating the argocd namespace..."
+# Delete namespace if it exists
+if kubectl get ns argocd >/dev/null 2>&1; then
+  kubectl delete ns argocd --wait
+fi
+
+# --- Cleanup orphaned CRDs ---
+echo "🧽 Cleaning up ArgoCD CRDs..."
+if $FORCE_CLEAN; then
+  # Aggressive mode: delete any CRD containing "argoproj.io"
+  ARGOCD_CRDS=$(kubectl get crds --no-headers 2>/dev/null | awk '/argoproj.io/ {print $1}' || true)
+else
+  # Normal mode: only CRDs known to ArgoCD
+  ARGOCD_CRDS=$(kubectl get crds --no-headers 2>/dev/null | awk '/argoproj.io/ && (/applications/ || /applicationsets/ || /appprojects/)/ {print $1}' || true)
+fi
+
+if [ -n "$ARGOCD_CRDS" ]; then
+  kubectl delete crd $ARGOCD_CRDS
+  echo "✅ Removed ArgoCD CRDs:"
+  echo "$ARGOCD_CRDS"
+else
+  echo "ℹ️ No ArgoCD CRDs found."
+fi
+
+# --- Cleanup orphaned cluster-scoped resources ---
+echo "🧽 Cleaning up ArgoCD cluster-scoped resources..."
+if $FORCE_CLEAN; then
+  # Aggressive mode: delete anything with "argocd" in the name
+  ARGOCD_CLUSTER_RESOURCES=$(kubectl get clusterrole,clusterrolebinding,mutatingwebhookconfiguration,validatingwebhookconfiguration \
+    -o name 2>/dev/null | grep argocd || true)
+else
+  # Normal mode: still delete but more targeted
+  ARGOCD_CLUSTER_RESOURCES=$(kubectl get clusterrole,clusterrolebinding,mutatingwebhookconfiguration,validatingwebhookconfiguration \
+    -o name 2>/dev/null | grep argocd || true)
+fi
+
+if [ -n "$ARGOCD_CLUSTER_RESOURCES" ]; then
+  kubectl delete $ARGOCD_CLUSTER_RESOURCES
+  echo "✅ Removed cluster-scoped ArgoCD resources:"
+  echo "$ARGOCD_CLUSTER_RESOURCES"
+else
+  echo "ℹ️ No cluster-scoped ArgoCD resources found."
+fi
+
+echo "📦 Creating namespace 'argocd'..."
 kubectl create namespace argocd
 
-echo "📥 Installing ArgoCD manifests..."
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+echo "📥 Adding and updating ArgoCD Helm repo..."
+helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+helm repo update >/dev/null 2>&1
 
-#echo "⏳ Waiting for ArgoCD services to be created..."
-#sleep 30
+echo "🚀 Installing ArgoCD with Helm..."
+helm upgrade --install argocd argo/argo-cd \
+  --namespace argocd \
+  --set server.service.type=NodePort \
+  --set server.service.nodePortHttp=30080 \
+  --set server.service.nodePortHttps=30443 \
+  --wait \
+  --timeout 10m0s
 
+# --- Wait for ArgoCD pods ---
+#echo "⏳ Waiting for ArgoCD pods to be ready..."
+#kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 
-#echo "🔧 Changing argocd-server service to NodePort for external access..."
-#kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort"}}'
-
-#echo "⏳ Waiting for NodePort assignment..."
-#sleep 5
-
-echo "🔎 Checking ArgoCD new services status after patching NodePort..."
-kubectl get svc -n argocd
-
-#echo "🌐 Starting port-forward to ArgoCD..."
-#if lsof -i :8080 >/dev/null 2>&1; then
-  #echo "⚠️ Port 8080 is already in use, skipping port-forward."
-#else
-  #kubectl port-forward svc/argocd-server -n argocd 8080:443 >/dev/null 2>&1 &
-  #sleep 2
-#fi
-
-echo "🔐 Configuring RBAC..."
+# --- Configure RBAC ---
+echo "🔐 Configuring RBAC for CI/CD service account..."
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ServiceAccount
@@ -66,53 +117,46 @@ subjects:
     namespace: argocd
 EOF
 
-echo "🔑 Retrieving the administrator password (waiting up to 30s)..."
+# --- Retrieve admin password ---
+echo "🔑 Retrieving the administrator password..."
 for i in {1..6}; do
   ADMIN_PWD=$(kubectl -n argocd get secret argocd-initial-admin-secret \
     -o jsonpath="{.data.password}" 2>/dev/null | base64 -d || true)
-
-  if [ -n "$ADMIN_PWD" ]; then
-    echo "✅ ArgoCD admin password: $ADMIN_PWD"
+  if [ -n "${ADMIN_PWD}" ]; then
+    echo "✅ ArgoCD admin password retrieved."
     break
-  else
-    echo "⏳ Secret not ready yet, retrying in 5s..."
-    sleep 5
   fi
+  echo "⏳ Secret not ready yet, retrying in 5s..."
+  sleep 5
 done
 
-if [ -z "$ADMIN_PWD" ]; then
-  echo "⚠️ Admin password not available yet. Run this manually later:"
+if [ -z "${ADMIN_PWD:-}" ]; then
+  echo "⚠️ Admin password not available yet. Retrieve it manually later:"
   echo 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
 fi
 
-echo "🔎 Checking ArgoCD pods (they may still be starting)..."
+# --- Display ArgoCD status ---
+echo "🔎 Checking ArgoCD pods..."
 kubectl get pods -n argocd
 
-echo "🔎 Checking ArgoCD services ..."
+echo "🔎 Checking ArgoCD services..."
 kubectl get svc -n argocd
 
-echo "🔧 Patching ArgoCD Changing argocd-server service to NodePort for external access..."
-kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort"}}'
-
-echo "⏳ Waiting for NodePort assignment..."
-sleep 5
-
-echo "🔎 Checking ArgoCD new services status after patching NodePort..."
-kubectl get svc -n argocd
-
-
-
-echo "🎉 ArgoCD deployment triggered!"
-echo "🌐 Access URL: https://178.254.23.139:8080"
-echo "👤 User: admin"
-echo "🔑 Password: $ADMIN_PWD"
-echo "💡 Note: It may take a few minutes for all ArgoCD components to   
-be fully operational."
-echo "🔗 To stop port-forwarding, run: kill \$(lsof -t -i :8080)"
-echo "🔗 To access the ArgoCD CLI, run: brew install argocd"
-echo "🔗 Then login with: argocd login 127.0.0.
-1:8080 --username admin --password $ADMIN_PWD --insecure"
-echo "🔗 To change the admin password, run: argocd account update-password" 
-echo "🔗 For more info, visit: https://argo-cd.readthedocs.io/en/stable/getting_started/"
-echo "🚀 Happy deploying with ArgoCD!"
-# End of script
+# --- Final instructions ---
+echo "🎉 ArgoCD has been successfully deployed on cluster 'development'"
+echo "🌐 Access ArgoCD UI at:"
+echo "   👉 http://127.0.0.1:30080 (HTTP)"
+echo "   👉 https://127.0.0.1:30443 (HTTPS)"
+echo "👤 Username: admin"
+echo "🔑 Password: ${ADMIN_PWD:-<pending>}"
+echo ""
+echo "💡 CLI access:"
+echo "   argocd login 127.0.0.1:30443 --username admin --password ${ADMIN_PWD:-<pending>} --insecure"
+echo ""
+echo "🔧 To change the admin password:"
+echo "   argocd account update-password"
+echo ""
+echo "📚 Documentation: https://argo-cd.readthedocs.io/en/stable/getting_started/"
+echo "🚀 Happy GitOps with ArgoCD!"
+echo ""
+echo "⚠️ Note: For production use, ensure to secure ArgoCD properly and avoid using default credentials."
