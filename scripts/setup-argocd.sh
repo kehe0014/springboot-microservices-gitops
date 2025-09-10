@@ -2,92 +2,179 @@
 set -euo pipefail
 
 # ============================================================
-# Expert-grade ArgoCD Installation Script using Helm
-# Target cluster: development (127.0.0.1)
-# Usage:
-#   ./setup-argocd.sh            # normal cleanup + install
-#   ./setup-argocd.sh --force-clean  # aggressive cleanup + install
+# Script d'Installation ArgoCD avec Helm et nginx-ingress
+# Version 2.0 - Avec logs d'exécution avancés
 # ============================================================
 
+# --- Configuration et variables ---
 FORCE_CLEAN=false
-if [[ "${1:-}" == "--force-clean" ]]; then
-  FORCE_CLEAN=true
-fi
+SKIP_RBAC=false
+EXTRA_HELM_ARGS=""
+CLUSTER_IP="178.254.23.139"
+ARGOCD_DOMAIN="argocd.${CLUSTER_IP}.nip.io"
+CURRENT_CONTEXT=$(kubectl config current-context)
+LOG_FILE="argocd-install-$(date '+%Y%m%d-%H%M%S').log"
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-# --- Pre-check: ensure cluster is reachable ---
-if ! kubectl cluster-info >/dev/null 2>&1; then
-  echo "❌ No Kubernetes cluster detected. Please start your cluster and set the correct context."
+
+# --- Fonctions de logging ---
+log() {
+    local message="[$(date '+%H:%M:%S')] - $1"
+    echo "$message" | tee -a "$LOG_FILE"
+}
+
+# Fonction pour capturer les logs de pods et les événements
+log_pod_events() {
+    local namespace=$1
+    local log_prefix=$2
+    log "--- Début de la journalisation des pods dans le namespace '$namespace' ---"
+    
+    # Capture des événements
+    log "Événements récents pour '$namespace':"
+    kubectl get events -n "$namespace" --sort-by='.lastTimestamp' --field-selector='type!=Normal' | tee -a "$LOG_FILE"
+    
+    # Capture des logs de pods
+    local pods=$(kubectl get pods -n "$namespace" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true)
+    if [ -z "$pods" ]; then
+        log "Aucun pod trouvé dans '$namespace'."
+    else
+        for pod in $pods; do
+            log "Logs du pod '$pod':"
+            kubectl logs "$pod" -n "$namespace" --tail=20 | tee -a "$LOG_FILE"
+        done
+    fi
+    log "--- Fin de la journalisation des pods dans le namespace '$namespace' ---"
+}
+
+
+# --- Début du script ---
+echo "=" >> "$LOG_FILE"
+echo "🚀 NOUVELLE SESSION ARGOCD - $(date)" >> "$LOG_FILE"
+echo "=" >> "$LOG_FILE"
+log "🔧 Démarrage de l'installation ArgoCD"
+log "📋 Contexte: $CURRENT_CONTEXT"
+log "🌐 Domain: $ARGOCD_DOMAIN"
+log "📁 Log file: $LOG_FILE"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --force-clean)
+      FORCE_CLEAN=true
+      shift
+      ;;
+    --skip-rbac)
+      SKIP_RBAC=true
+      shift
+      ;;
+    --domain)
+      ARGOCD_DOMAIN="$2"
+      shift 2
+      ;;
+    --set*)
+      EXTRA_HELM_ARGS="$EXTRA_HELM_ARGS $1"
+      shift
+      ;;
+    -*|--*)
+      log "❌ Option inconnue $1"
+      exit 1
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+# Vérifications préliminaires
+log "🔍 Vérification de l'accès au cluster..."
+if ! kubectl cluster-info &> /dev/null; then
+  log "❌ Cluster Kubernetes non détecté."
   exit 1
 fi
+log "✅ Cluster accessible"
 
-echo "🧹 Cleaning up any existing ArgoCD installation..."
-
-# Delete namespace if it exists
-if kubectl get ns argocd >/dev/null 2>&1; then
-  kubectl delete ns argocd --wait
+if ! command -v helm &> /dev/null; then
+  log "❌ Helm n'est pas installé."
+  exit 1
 fi
+log "✅ Helm est installé: $(helm version --short)"
 
-# --- Cleanup orphaned CRDs ---
-echo "🧽 Cleaning up ArgoCD CRDs..."
+log "🧹 Nettoyage de l'installation ArgoCD existante..."
+# Suppression des ressources existantes pour une installation propre
+kubectl delete ns argocd --wait --timeout=120s 2>/dev/null || true
+log "✅ Nettoyage du namespace 'argocd' terminé."
+
+# Nettoyage des CRDs
 if $FORCE_CLEAN; then
-  # Aggressive mode: delete any CRD containing "argoproj.io"
-  ARGOCD_CRDS=$(kubectl get crds --no-headers 2>/dev/null | awk '/argoproj.io/ {print $1}' || true)
-else
-  # Normal mode: only CRDs known to ArgoCD
-  ARGOCD_CRDS=$(kubectl get crds --no-headers 2>/dev/null | awk '/argoproj.io/ && (/applications/ || /applicationsets/ || /appprojects/)/ {print $1}' || true)
+    log "🧽 Suppression des CRDs ArgoCD (mode force)..."
+    kubectl get crds -o name | grep 'argoproj.io' | xargs -r kubectl delete --timeout=30s 2>/dev/null || true
+fi
+log "✅ Nettoyage des CRDs terminé."
+
+log "📦 Création du namespace 'argocd'..."
+kubectl create namespace argocd || true
+kubectl label namespace argocd environment=staging app.kubernetes.io/part-of=argocd --overwrite
+log "✅ Namespace 'argocd' créé et labellisé."
+
+log "📥 Ajout et mise à jour du dépôt Helm ArgoCD..."
+helm repo add argo https://argoproj.github.io/argo-helm --force-update >/dev/null
+helm repo update >/dev/null
+log "✅ Dépôts Helm mis à jour."
+
+# --- Préparation des valeurs Helm avec la correction de l'Ingress ---
+log "🔧 Préparation de la configuration Helm..."
+HELM_VALUES="--kube-context=${CURRENT_CONTEXT} \
+--set server.ingress.enabled=true \
+--set server.ingress.ingressClassName=nginx \
+--set server.ingress.hosts[0]=${ARGOCD_DOMAIN} \
+--set server.ingress.annotations.nginx\.ingress\.kubernetes\.io/force-ssl-redirect=true \
+--set server.ingress.annotations.nginx\.ingress\.kubernetes\.io/backend-protocol=HTTP \
+--set server.ingress.annotations.nginx\.ingress\.kubernetes\.io/proxy-body-size=100m \
+--set server.ingress.tls[0].hosts[0]=${ARGOCD_DOMAIN} \
+--set server.ingress.tls[0].secretName=argocd-tls \
+--set server.extraArgs[0]=--insecure"
+
+# Ajout des arguments Helm supplémentaires
+if [ -n "$EXTRA_HELM_ARGS" ]; then
+    HELM_VALUES="$HELM_VALUES $EXTRA_HELM_ARGS"
 fi
 
-if [ -n "$ARGOCD_CRDS" ]; then
-  kubectl delete crd $ARGOCD_CRDS
-  echo "✅ Removed ArgoCD CRDs:"
-  echo "$ARGOCD_CRDS"
-else
-  echo "ℹ️ No ArgoCD CRDs found."
-fi
+log "🚀 Démarrage de l'installation ArgoCD avec Helm..."
+log "📋 Commande Helm:"
+log "helm upgrade --install argocd argo/argo-cd --namespace argocd $HELM_VALUES --wait --timeout 10m0s"
 
-# --- Cleanup orphaned cluster-scoped resources ---
-echo "🧽 Cleaning up ArgoCD cluster-scoped resources..."
-if $FORCE_CLEAN; then
-  # Aggressive mode: delete anything with "argocd" in the name
-  ARGOCD_CLUSTER_RESOURCES=$(kubectl get clusterrole,clusterrolebinding,mutatingwebhookconfiguration,validatingwebhookconfiguration \
-    -o name 2>/dev/null | grep argocd || true)
-else
-  # Normal mode: still delete but more targeted
-  ARGOCD_CLUSTER_RESOURCES=$(kubectl get clusterrole,clusterrolebinding,mutatingwebhookconfiguration,validatingwebhookconfiguration \
-    -o name 2>/dev/null | grep argocd || true)
-fi
-
-if [ -n "$ARGOCD_CLUSTER_RESOURCES" ]; then
-  kubectl delete $ARGOCD_CLUSTER_RESOURCES
-  echo "✅ Removed cluster-scoped ArgoCD resources:"
-  echo "$ARGOCD_CLUSTER_RESOURCES"
-else
-  echo "ℹ️ No cluster-scoped ArgoCD resources found."
-fi
-
-echo "📦 Creating namespace 'argocd'..."
-kubectl create namespace argocd
-
-echo "📥 Adding and updating ArgoCD Helm repo..."
-helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
-helm repo update >/dev/null 2>&1
-
-echo "🚀 Installing ArgoCD with Helm..."
-helm upgrade --install argocd argo/argo-cd \
+# Exécution de l'installation Helm
+if ! helm upgrade --install argocd argo/argo-cd \
   --namespace argocd \
-  --set server.service.type=NodePort \
-  --set server.service.nodePortHttp=30080 \
-  --set server.service.nodePortHttps=30443 \
+  $HELM_VALUES \
   --wait \
-  --timeout 10m0s
+  --timeout 10m0s 2>&1 | tee -a "$LOG_FILE"; then
+    log "❌ Échec de l'installation Helm."
+    log "🔍 Journalisation des erreurs de déploiement..."
+    log_pod_events "argocd" "argocd-install"
+    log "Journalisation de la cause de l'erreur du déploiement NGINX Ingress..."
+    log_pod_events "ingress-nginx" "nginx-ingress"
+    exit 1
+fi
 
-# --- Wait for ArgoCD pods ---
-#echo "⏳ Waiting for ArgoCD pods to be ready..."
-#kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
+log "✅ Installation Helm terminée avec succès."
 
-# --- Configure RBAC ---
-echo "🔐 Configuring RBAC for CI/CD service account..."
-kubectl apply -f - <<EOF
+# --- Journalisation post-déploiement ---
+log "🔍 Journalisation des ressources déployées..."
+log "--- Statut du déploiement ---"
+kubectl get all,ingress -n argocd --show-labels | tee -a "$LOG_FILE"
+log "--- Description de l'Ingress ---"
+kubectl describe ingress argocd-server -n argocd | tee -a "$LOG_FILE"
+log "--- Logs des pods ArgoCD ---"
+log_pod_events "argocd" "argocd-post-install"
+log "--- Logs du contrôleur Nginx Ingress ---"
+log_pod_events "ingress-nginx" "nginx-post-install"
+
+
+# --- Configuration RBAC et récupération du mot de passe ---
+if ! $SKIP_RBAC; then
+    log "🔐 Application de la configuration RBAC..."
+    kubectl apply -f - <<EOF | tee -a "$LOG_FILE"
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -116,47 +203,31 @@ subjects:
     name: argocd-deployer
     namespace: argocd
 EOF
-
-# --- Retrieve admin password ---
-echo "🔑 Retrieving the administrator password..."
-for i in {1..6}; do
-  ADMIN_PWD=$(kubectl -n argocd get secret argocd-initial-admin-secret \
-    -o jsonpath="{.data.password}" 2>/dev/null | base64 -d || true)
-  if [ -n "${ADMIN_PWD}" ]; then
-    echo "✅ ArgoCD admin password retrieved."
-    break
-  fi
-  echo "⏳ Secret not ready yet, retrying in 5s..."
-  sleep 5
-done
-
-if [ -z "${ADMIN_PWD:-}" ]; then
-  echo "⚠️ Admin password not available yet. Retrieve it manually later:"
-  echo 'kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d'
+    log "✅ Configuration RBAC appliquée."
 fi
 
-# --- Display ArgoCD status ---
-echo "🔎 Checking ArgoCD pods..."
-kubectl get pods -n argocd
+ADMIN_PWD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 --decode || echo "unknown")
+if [ "$ADMIN_PWD" == "unknown" ] || [ -z "$ADMIN_PWD" ]; then
+    log "⚠️ Impossible de récupérer le mot de passe admin."
+else
+    log "✅ Mot de passe admin récupéré."
+fi
 
-echo "🔎 Checking ArgoCD services..."
-kubectl get svc -n argocd
+# --- Instructions finales ---
+cat << EOF
 
-# --- Final instructions ---
-echo "🎉 ArgoCD has been successfully deployed on cluster 'development'"
-echo "🌐 Access ArgoCD UI at:"
-echo "   👉 http://127.0.0.1:30080 (HTTP)"
-echo "   👉 https://127.0.0.1:30443 (HTTPS)"
-echo "👤 Username: admin"
-echo "🔑 Password: ${ADMIN_PWD:-<pending>}"
-echo ""
-echo "💡 CLI access:"
-echo "   argocd login 127.0.0.1:30443 --username admin --password ${ADMIN_PWD:-<pending>} --insecure"
-echo ""
-echo "🔧 To change the admin password:"
-echo "   argocd account update-password"
-echo ""
-echo "📚 Documentation: https://argo-cd.readthedocs.io/en/stable/getting_started/"
-echo "🚀 Happy GitOps with ArgoCD!"
-echo ""
-echo "⚠️ Note: For production use, ensure to secure ArgoCD properly and avoid using default credentials."
+🎉 Déploiement d'ArgoCD réussi sur https://${ARGOCD_DOMAIN}
+
+📋 Informations de connexion:
+   👤 Username: admin
+   🔑 Password: ${ADMIN_PWD}
+
+---
+💡 **Comment ça fonctionne ?**
+* Le script installe ArgoCD et configure un Ingress pour votre domaine.
+* L'Ingress Nginx gère le trafic entrant et le redirige vers le service ArgoCD.
+* Le script capture les logs des pods et les événements dans le fichier **$LOG_FILE** pour le débogage.
+
+---
+🚀 Bon GitOps!
+EOF
