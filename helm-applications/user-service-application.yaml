@@ -11,7 +11,7 @@ spec:
     path: user-service/helm
     helm:
       valueFiles:
-        - ../helm-values/staging/user-values.yaml # Path is relative to the ArgoCD Application manifest
+        - ../helm-values/staging/user-service-values.yaml # Path is relative to the ArgoCD Application manifest
   destination:
     server: https://kubernetes.default.svc
     namespace: gitops-demo-staging
