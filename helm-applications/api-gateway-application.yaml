@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-gateway-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kehe0014/springboot-microservices-helm.git
+    targetRevision: HEAD
+    path: gateway-service/helm
+    helm:
+      valueFiles:
+        - ../helm-values/staging/api-gateway-values.yaml # Path is relative to the ArgoCD Application manifest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops-demo-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

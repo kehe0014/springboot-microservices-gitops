@@ -1,0 +1,5 @@
+# Values for the staging environment
+image:
+  tag: "1.1.0" # Or a specific commit-based tag
+service:
+  type: ClusterIP
