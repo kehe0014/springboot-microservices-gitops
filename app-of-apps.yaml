@@ -1,0 +1,55 @@
+# This ArgoCD Application resource implements the "App of Apps" pattern.
+# It's a key GitOps best practice for managing all other applications
+# from a single source of truth in Git.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-demo-apps
+  namespace: argocd
+  # The 'finalizer' ensures that the application's resources are properly
+  # pruned by ArgoCD when the application is deleted.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  # The 'project' field logically groups applications. Using 'default' is fine
+  # for simple setups, but in production, you might use different projects
+  # for different teams or environments.
+  project: default
+  
+  # The 'source' block defines the repository and path where ArgoCD
+  # will find the child application manifests to manage.
+  source:
+    # 'repoURL' points to the Git repository containing the application definitions.
+    # It must be the same GitOps repository this manifest lives in.
+    repoURL: https://github.com/kehe0014/springboot-microservices-gitops.git
+    
+    # 'targetRevision' specifies the Git revision to sync to. 'HEAD' is used
+    # for automatic synchronization with the latest commit on the default branch.
+    targetRevision: HEAD
+    
+    # 'path' is the subdirectory containing all the child Application manifests.
+    # ArgoCD will recursively find and manage all YAML files in this directory.
+    path: helm-applications/
+  
+  # The 'destination' specifies the Kubernetes cluster and namespace where
+  # the managed Application resources themselves will be created.
+  destination:
+    # 'server' is the API server URL. 'https://kubernetes.default.svc' refers
+    # to the in-cluster API server.
+    server: https://kubernetes.default.svc
+    
+    # 'namespace' is where ArgoCD will create the child Application resources.
+    # It should be the same namespace where ArgoCD is running.
+    namespace: argocd
+  
+  # The 'syncPolicy' defines the synchronization behavior for this application.
+  syncPolicy:
+    automated:
+      # 'prune: true' allows ArgoCD to delete resources from the cluster
+      # if they are removed from the Git repository.
+      prune: true
+      
+      # 'selfHeal: true' automatically corrects any differences between
+      # the desired state in Git and the live state in the cluster.
+      selfHeal: true
